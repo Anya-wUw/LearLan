@@ -1,0 +1,27 @@
+# Environment
+.env
+*.env
+
+# Virtual environment
+venv/
+
+# Internal docs
+CLAUDE.md
+language_learning_app_spec.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
+.claude/

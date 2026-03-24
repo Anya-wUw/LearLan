@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — LearLan{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="fw-bold mb-0">My Groups</h3>
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newGroupModal">
+    <i class="bi bi-plus-lg"></i> New Group
+  </button>
+</div>
+
+<!-- Language tabs -->
+<ul class="nav nav-pills mb-4" id="langTabs">
+  <li class="nav-item">
+    <button class="nav-link active" data-lang="all" onclick="filterGroups('all', this)">📚 All</button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-lang="zh" onclick="filterGroups('zh', this)">🇨🇳 Chinese</button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-lang="pl" onclick="filterGroups('pl', this)">🇵🇱 Polish</button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-lang="en" onclick="filterGroups('en', this)">🇬🇧 English</button>
+  </li>
+</ul>
+
+{% if not groups %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-collection" style="font-size:3rem;"></i>
+  <p class="mt-3">No groups yet. Create one to get started!</p>
+</div>
+{% else %}
+<div class="row g-3" id="groupsGrid">
+  {% for group in groups %}
+  <div class="col-md-4 col-sm-6 group-item" data-language="{{ group.language }}">
+    <div class="card h-100 shadow-sm group-card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <span class="fs-2">{{ '🇨🇳' if group.language == 'zh' else ('🇬🇧' if group.language == 'en' else '🇵🇱') }}</span>
+          <div class="dropdown">
+            <button class="btn btn-sm btn-link text-muted p-0" data-bs-toggle="dropdown">
+              <i class="bi bi-three-dots-vertical"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li>
+                <button class="dropdown-item" onclick="renameGroup('{{ group.id }}', '{{ group.name }}')">
+                  <i class="bi bi-pencil me-2"></i>Rename
+                </button>
+              </li>
+              <li>
+                <button class="dropdown-item text-danger" onclick="deleteGroup('{{ group.id }}', this)">
+                  <i class="bi bi-trash me-2"></i>Delete
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+        <a href="{{ url_for('groups.view_group', group_id=group.id) }}" class="text-decoration-none">
+          <h5 class="card-title mt-2 mb-1 text-dark">{{ group.name }}</h5>
+          <p class="text-muted small mb-0">
+            {{ group.card_count }} card{{ 's' if group.card_count != 1 else '' }} ·
+            {{ group.created_at[:10] if group.created_at else '' }}
+          </p>
+        </a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- New Group Modal -->
+<div class="modal fade" id="newGroupModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title fw-bold">Choose a language</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-6">
+            <a href="{{ url_for('chat.chat', language='zh') }}"
+               class="card text-center p-4 text-decoration-none lang-card">
+              <div class="fs-1">🇨🇳</div>
+              <div class="fw-semibold mt-2">Chinese</div>
+              <div class="text-muted small">Mandarin</div>
+            </a>
+          </div>
+          <div class="col-6">
+            <a href="{{ url_for('chat.chat', language='pl') }}"
+               class="card text-center p-4 text-decoration-none lang-card">
+              <div class="fs-1">🇵🇱</div>
+              <div class="fw-semibold mt-2">Polish</div>
+              <div class="text-muted small">Polski</div>
+            </a>
+          </div>
+          <div class="col-6">
+            <a href="{{ url_for('chat.chat', language='en') }}"
+               class="card text-center p-4 text-decoration-none lang-card">
+              <div class="fs-1">🇬🇧</div>
+              <div class="fw-semibold mt-2">English</div>
+              <div class="text-muted small">For Russian speakers</div>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterGroups(lang, btn) {
+  document.querySelectorAll('#langTabs .nav-link').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  localStorage.setItem('dashLang', lang);
+  document.querySelectorAll('.group-item').forEach(el => {
+    el.classList.toggle('d-none', lang !== 'all' && el.dataset.language !== lang);
+  });
+}
+
+// Restore saved tab
+const saved = localStorage.getItem('dashLang') || 'all';
+const savedBtn = document.querySelector(`[data-lang="${saved}"]`);
+if (savedBtn) filterGroups(saved, savedBtn);
+
+function renameGroup(groupId, currentName) {
+  const name = prompt('New name:', currentName);
+  if (!name || name.trim() === currentName) return;
+  fetch(`/groups/${groupId}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: name.trim()})
+  }).then(r => r.json()).then(d => { if (d.success) location.reload(); });
+}
+
+function deleteGroup(groupId, btn) {
+  if (!confirm('Delete this group and all its cards?')) return;
+  fetch(`/groups/${groupId}`, {method: 'DELETE'})
+    .then(r => r.json())
+    .then(d => { if (d.success) btn.closest('.group-item').remove(); });
+}
+</script>
+{% endblock %}

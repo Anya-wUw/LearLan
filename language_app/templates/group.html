@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block title %}{{ group.name }} — LearLan{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+  <div class="d-flex align-items-center gap-3">
+    <a href="{{ url_for('groups.dashboard') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i>
+    </a>
+    <span class="fs-3">{{ '🇨🇳' if group.language == 'zh' else ('🇬🇧' if group.language == 'en' else '🇵🇱') }}</span>
+    <h3 class="fw-bold mb-0" id="groupTitle">{{ group.name }}</h3>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" onclick="renameThisGroup()">
+      <i class="bi bi-pencil me-1"></i> Rename
+    </button>
+    <a href="{{ url_for('chat.chat', group_id=group.id) }}" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-plus-lg me-1"></i> Add Words
+    </a>
+    <button class="btn btn-outline-danger btn-sm" onclick="deleteThisGroup()">
+      <i class="bi bi-trash me-1"></i> Delete Group
+    </button>
+  </div>
+</div>
+
+{% if not cards %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-card-text" style="font-size:3rem;"></i>
+  <p class="mt-3">No cards yet. <a href="{{ url_for('chat.chat', group_id=group.id) }}">Add some words!</a></p>
+</div>
+{% else %}
+<p class="text-muted mb-3 small">Click a card to flip it.</p>
+<div class="row g-3" id="cardsGrid">
+{% for card in cards %}
+<div class="col-md-4 col-sm-6" id="card-container-{{ card.id }}">
+  <div class="flip-card" id="flip-{{ card.id }}" onclick="handleFlip(event, '{{ card.id }}')">
+    <div class="flip-card-inner">
+      <!-- Front -->
+      <div class="flip-card-front card shadow-sm">
+        <div class="card-body d-flex flex-column justify-content-center align-items-center text-center p-3 position-relative">
+          <!-- Action buttons top-right -->
+          <div class="position-absolute top-0 end-0 p-1 d-flex gap-1" onclick="event.stopPropagation()">
+            <button class="btn btn-sm btn-link p-1 text-secondary" title="Edit"
+                    onclick="startEdit('{{ card.id }}')">
+              <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-link p-1 text-danger" title="Delete"
+                    onclick="deleteCard('{{ card.id }}')">
+              <i class="bi bi-trash"></i>
+            </button>
+            <button class="btn btn-sm btn-link p-1" title="Dialogue"
+                    onclick="openDialogue('{{ card.id }}', '{{ card.foreign_word | e }}', {{ 'true' if card.id in cards_with_dialogues else 'false' }})">
+              💬
+            </button>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="fw-bold fs-4">{{ card.foreign_word }}</span>
+            {% if card.audio_word_url %}
+            <button class="btn btn-sm btn-link p-0 text-primary"
+                    onclick="event.stopPropagation(); playAudio('{{ card.audio_word_url }}')">
+              <i class="bi bi-volume-up-fill"></i>
+            </button>
+            {% else %}
+            <span class="text-muted small" title="Audio generating…"><i class="bi bi-hourglass-split"></i></span>
+            {% endif %}
+          </div>
+          <div class="text-muted small fst-italic">{{ card.transcription }}</div>
+        </div>
+      </div>
+      <!-- Back -->
+      <div class="flip-card-back card shadow-sm">
+        <div class="card-body overflow-auto p-3">
+          <p class="mb-1"><strong>🇷🇺</strong> {{ card.translation_ru }}</p>
+          <p class="text-muted small mb-3"><strong>🇬🇧</strong> {{ card.translation_en }}</p>
+          {% if card.examples_with_audio %}
+          <hr class="my-2" />
+          <div class="small">
+            {% for ex, audio_url in card.examples_with_audio %}
+            <div class="mb-2">
+              <div class="d-flex align-items-start gap-1">
+                <span class="fw-medium">{{ ex.sentence_foreign }}</span>
+                {% if audio_url %}
+                <button class="btn btn-link btn-sm p-0 text-primary flex-shrink-0"
+                        onclick="event.stopPropagation(); playAudio('{{ audio_url }}')">
+                  <i class="bi bi-volume-up"></i>
+                </button>
+                {% endif %}
+              </div>
+              {% if ex.get('sentence_pinyin') %}
+              <div class="text-muted fst-italic" style="font-size:0.78em">{{ ex.sentence_pinyin }}</div>
+              {% endif %}
+              <div class="text-muted">{{ ex.sentence_ru }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit mode -->
+  <div class="card shadow-sm border-primary d-none" id="edit-{{ card.id }}">
+    <div class="card-body p-3">
+      <div class="mb-2">
+        <label class="form-label small fw-semibold mb-1">Word</label>
+        <input type="text" class="form-control form-control-sm" id="edit-word-{{ card.id }}" value="{{ card.foreign_word }}" />
+      </div>
+      <div class="mb-2">
+        <label class="form-label small fw-semibold mb-1">Transcription</label>
+        <input type="text" class="form-control form-control-sm" id="edit-trans-{{ card.id }}" value="{{ card.transcription or '' }}" />
+      </div>
+      <div class="mb-2">
+        <label class="form-label small fw-semibold mb-1">Russian</label>
+        <input type="text" class="form-control form-control-sm" id="edit-ru-{{ card.id }}" value="{{ card.translation_ru or '' }}" />
+      </div>
+      <div class="mb-3">
+        <label class="form-label small fw-semibold mb-1">English</label>
+        <input type="text" class="form-control form-control-sm" id="edit-en-{{ card.id }}" value="{{ card.translation_en or '' }}" />
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-primary" onclick="saveEdit('{{ card.id }}')">
+          <i class="bi bi-check-lg"></i> Save
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="cancelEdit('{{ card.id }}')">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+<!-- Dialogue Modal -->
+<div class="modal fade" id="dialogueModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title fw-bold" id="dialogueModalTitle">💬 Dialogue</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="dialogueModalBody">
+        <div class="text-center py-4">
+          <div class="spinner-border text-primary" role="status"></div>
+          <p class="text-muted mt-2">Generating dialogue…</p>
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0 d-none" id="dialogueFooter">
+        <button class="btn btn-outline-primary btn-sm" onclick="playFullDialogue()">
+          ▶ Play full dialogue
+        </button>
+        <a id="dialogueViewLink" href="#" class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-arrows-fullscreen me-1"></i>Full view
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<audio id="audioPlayer"></audio>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/cards.js') }}"></script>
+<script>
+const GROUP_ID = '{{ group.id }}';
+const GROUP_LANGUAGE = '{{ group.language }}';
+let currentDialogueAudioUrls = [];
+let dialogueAudioIndex = 0;
+
+const EMOJIS = ['🐱','🌸','🦊','🐼','🦄','🐸','🦋','🐶','🐯','🐨'];
+function getAvatar(name) {
+  const emoji = EMOJIS[(name || '?').charCodeAt(0) % EMOJIS.length];
+  return `<div class="dialogue-avatar">${emoji}</div>`;
+}
+
+function handleFlip(event, cardId) {
+  if (!document.getElementById(`edit-${cardId}`).classList.contains('d-none')) return;
+  document.getElementById(`flip-${cardId}`).classList.toggle('flipped');
+}
+
+function playAudio(url) {
+  const p = document.getElementById('audioPlayer');
+  p.src = url; p.play();
+}
+
+function startEdit(cardId) {
+  document.getElementById(`flip-${cardId}`).classList.add('d-none');
+  document.getElementById(`edit-${cardId}`).classList.remove('d-none');
+}
+function cancelEdit(cardId) {
+  document.getElementById(`edit-${cardId}`).classList.add('d-none');
+  document.getElementById(`flip-${cardId}`).classList.remove('d-none');
+}
+async function saveEdit(cardId) {
+  const data = {
+    foreign_word: document.getElementById(`edit-word-${cardId}`).value,
+    transcription: document.getElementById(`edit-trans-${cardId}`).value,
+    translation_ru: document.getElementById(`edit-ru-${cardId}`).value,
+    translation_en: document.getElementById(`edit-en-${cardId}`).value,
+  };
+  const res = await fetch(`/cards/${cardId}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+  const d = await res.json();
+  if (d.success) {
+    cancelEdit(cardId);
+    const front = document.querySelector(`#flip-${cardId} .flip-card-front .fw-bold`);
+    if (front) front.textContent = data.foreign_word;
+    const trans = document.querySelector(`#flip-${cardId} .flip-card-front .fst-italic`);
+    if (trans) trans.textContent = data.transcription;
+  }
+}
+async function deleteCard(cardId) {
+  if (!confirm('Delete this card?')) return;
+  const res = await fetch(`/cards/${cardId}`, {method:'DELETE'});
+  const d = await res.json();
+  if (d.success) document.getElementById(`card-container-${cardId}`).remove();
+}
+async function renameThisGroup() {
+  const current = document.getElementById('groupTitle').textContent.trim();
+  const name = prompt('New group name:', current);
+  if (!name || name.trim() === current) return;
+  const res = await fetch(`/groups/${GROUP_ID}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim()})});
+  const d = await res.json();
+  if (d.success) document.getElementById('groupTitle').textContent = name.trim();
+}
+async function deleteThisGroup() {
+  if (!confirm('Delete this entire group and all its cards?')) return;
+  const res = await fetch(`/groups/${GROUP_ID}`, {method:'DELETE'});
+  const d = await res.json();
+  if (d.success) window.location.href = '/dashboard';
+}
+
+async function openDialogue(cardId, word, hasDialogue) {
+  const modal = new bootstrap.Modal(document.getElementById('dialogueModal'));
+  document.getElementById('dialogueModalTitle').textContent = `💬 ${word}`;
+  document.getElementById('dialogueModalBody').innerHTML = `<div class="text-center py-4"><div class="spinner-border text-primary"></div><p class="text-muted mt-2">${hasDialogue ? 'Loading…' : 'Generating dialogue…'}</p></div>`;
+  document.getElementById('dialogueFooter').classList.add('d-none');
+  modal.show();
+
+  const res = await fetch(`/cards/${cardId}/dialogue`, {method:'POST'});
+  const data = await res.json();
+  if (data.error) {
+    document.getElementById('dialogueModalBody').innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+    return;
+  }
+  renderDialogue(data.dialogue);
+}
+
+function renderDialogue(dialogue) {
+  const lines = dialogue.lines || [];
+  const aName = dialogue.speaker_a_name || 'A';
+  const bName = dialogue.speaker_b_name || 'B';
+  const audioUrls = dialogue.audio_lines_urls || [];
+  currentDialogueAudioUrls = audioUrls;
+
+  document.getElementById('dialogueViewLink').href = `/dialogues/${dialogue.id}`;
+
+  let html = `<div class="dialogue-chat">`;
+  lines.forEach((line, i) => {
+    const isA = line.speaker === 'A';
+    const name = isA ? aName : bName;
+    const url = audioUrls[i];
+    const audioBtn = url ? `<button class="btn btn-link btn-sm p-0 align-self-center" onclick="playAudio('${url}')"><i class="bi bi-volume-up"></i></button>` : '';
+    const bubble = `<div class="dialogue-bubble-wrap">
+      <div class="dialogue-name ${isA ? '' : 'text-end'}">${name}</div>
+      <div class="dialogue-bubble ${isA ? 'bubble-a' : 'bubble-b'}">
+        <div class="bubble-foreign">${line.text_foreign || ''}</div>
+        ${line.text_pinyin ? `<div class="bubble-pinyin">${line.text_pinyin}</div>` : ''}
+        <div class="bubble-ru">${line.text_ru || ''}</div>
+      </div>
+    </div>`;
+    if (isA) {
+      html += `<div class="dialogue-row dialogue-left">${getAvatar(name)}${bubble}${audioBtn}</div>`;
+    } else {
+      html += `<div class="dialogue-row dialogue-right">${audioBtn}${bubble}${getAvatar(name)}</div>`;
+    }
+  });
+  html += `</div>`;
+
+  document.getElementById('dialogueModalBody').innerHTML = html;
+  document.getElementById('dialogueFooter').classList.remove('d-none');
+}
+
+function playFullDialogue() {
+  const urls = currentDialogueAudioUrls.filter(Boolean);
+  if (!urls.length) return;
+  dialogueAudioIndex = 0;
+  const player = document.getElementById('audioPlayer');
+  player.src = urls[0];
+  player.play();
+  player.onended = () => {
+    dialogueAudioIndex++;
+    if (dialogueAudioIndex < urls.length) {
+      player.src = urls[dialogueAudioIndex];
+      player.play();
+    } else {
+      player.onended = null;
+    }
+  };
+}
+</script>
+{% endblock %}

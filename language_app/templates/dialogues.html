@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Dialogues — LearLan{% endblock %}
+
+{% block content %}
+<h3 class="fw-bold mb-3">💬 My Dialogues</h3>
+
+<!-- Language filter tabs -->
+<ul class="nav nav-pills mb-4" id="dlgLangTabs">
+  <li class="nav-item"><button class="nav-link active" data-lang="all" onclick="filterDlg('all',this)">📚 All</button></li>
+  <li class="nav-item"><button class="nav-link" data-lang="zh" onclick="filterDlg('zh',this)">🇨🇳 Chinese</button></li>
+  <li class="nav-item"><button class="nav-link" data-lang="pl" onclick="filterDlg('pl',this)">🇵🇱 Polish</button></li>
+  <li class="nav-item"><button class="nav-link" data-lang="en" onclick="filterDlg('en',this)">🇬🇧 English</button></li>
+</ul>
+
+{% if not dialogues %}
+<div class="text-center py-5 text-muted">
+  <div style="font-size:3rem">💬</div>
+  <p class="mt-3">No dialogues yet. Open any flashcard and click 💬 to generate one.</p>
+</div>
+{% else %}
+<div class="row g-3" id="dlgGrid">
+{% for dlg in dialogues %}
+{% set lang = dlg.cards.groups.language if dlg.cards and dlg.cards.groups else '' %}
+<div class="col-md-6 dlg-item" data-language="{{ lang }}">
+  <div class="card shadow-sm h-100">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <span class="fs-4 me-2">{{ '🇨🇳' if lang == 'zh' else ('🇬🇧' if lang == 'en' else '🇵🇱') }}</span>
+          <strong>{{ dlg.cards.foreign_word if dlg.cards else '—' }}</strong>
+        </div>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteDlg('{{ dlg.id }}', this)">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
+      {% set emojis = ['🐱','🌸','🦊','🐼','🦄','🐸','🦋','🐶','🐯','🐨'] %}
+      <div class="d-flex gap-2 mt-2 align-items-center">
+        <div class="dialogue-avatar sm">{{ emojis[((dlg.speaker_a_name or 'A')[0] | ord) % 10] }}</div>
+        <span class="text-muted small">{{ dlg.speaker_a_name }}</span>
+        <span class="text-muted">×</span>
+        <div class="dialogue-avatar sm">{{ emojis[((dlg.speaker_b_name or 'B')[0] | ord) % 10] }}</div>
+        <span class="text-muted small">{{ dlg.speaker_b_name }}</span>
+      </div>
+      {% if dlg.lines %}
+      <p class="text-muted small mt-2 mb-0 fst-italic">"{{ dlg.lines[0].text_foreign }}"</p>
+      {% endif %}
+      <div class="d-flex gap-2 mt-3">
+        <a href="{{ url_for('dialogues.view_dialogue', dialogue_id=dlg.id) }}" class="btn btn-sm btn-outline-primary">
+          <i class="bi bi-eye me-1"></i>View
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterDlg(lang, btn) {
+  document.querySelectorAll('#dlgLangTabs .nav-link').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  localStorage.setItem('dlgLang', lang);
+  document.querySelectorAll('.dlg-item').forEach(el => {
+    el.classList.toggle('d-none', lang !== 'all' && el.dataset.language !== lang);
+  });
+}
+const saved = localStorage.getItem('dlgLang') || 'all';
+const savedBtn = document.querySelector(`[data-lang="${saved}"]`);
+if (savedBtn) filterDlg(saved, savedBtn);
+
+async function deleteDlg(id, btn) {
+  if (!confirm('Delete this dialogue?')) return;
+  const res = await fetch(`/dialogues/${id}`, {method:'DELETE'});
+  const d = await res.json();
+  if (d.success) btn.closest('.dlg-item').remove();
+}
+</script>
+{% endblock %}

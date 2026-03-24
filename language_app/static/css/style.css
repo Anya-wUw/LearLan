@@ -1,0 +1,215 @@
+:root {
+  --color-lavender: #E8E4F0;
+  --color-mint: #D4EDE1;
+  --color-peach: #FAE3D9;
+  --color-blue: #D6EAF8;
+  --color-white: #FFFFFF;
+}
+
+body {
+  font-family: 'Nunito', sans-serif;
+  background-color: #F8F7FC;
+  color: #333;
+}
+
+.navbar {
+  border-bottom: 1px solid #eee;
+}
+
+.navbar-brand {
+  font-size: 1.25rem;
+  color: #5b4fcf !important;
+}
+
+/* Group cards on dashboard */
+.group-card {
+  border-radius: 12px;
+  border: 1px solid #eee;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.group-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.1) !important;
+}
+
+/* Language selection cards */
+.lang-card {
+  border-radius: 12px;
+  border: 2px solid #eee;
+  transition: border-color 0.15s, transform 0.15s;
+  color: #333;
+}
+.lang-card:hover {
+  border-color: #5b4fcf;
+  transform: translateY(-2px);
+  color: #5b4fcf;
+}
+
+/* Chat preview cards */
+.preview-card {
+  border-radius: 12px;
+  border: 1px solid #e0dcf0;
+  background: var(--color-white);
+}
+.preview-card:hover {
+  border-color: #a89fe0;
+}
+
+/* Flip cards */
+.flip-card {
+  height: 280px;
+  cursor: pointer;
+  perspective: 1000px;
+}
+.flip-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.55s;
+  transform-style: preserve-3d;
+}
+.flip-card.flipped .flip-card-inner {
+  transform: rotateY(180deg);
+}
+.flip-card-front,
+.flip-card-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.flip-card-front {
+  background: linear-gradient(135deg, var(--color-lavender), var(--color-white));
+}
+.flip-card-back {
+  background: linear-gradient(135deg, var(--color-mint), var(--color-white));
+  transform: rotateY(180deg);
+}
+
+/* Buttons */
+.btn-primary {
+  background-color: #5b4fcf;
+  border-color: #5b4fcf;
+}
+.btn-primary:hover {
+  background-color: #4a40b5;
+  border-color: #4a40b5;
+}
+.btn-outline-primary {
+  color: #5b4fcf;
+  border-color: #5b4fcf;
+}
+.btn-outline-primary:hover {
+  background-color: #5b4fcf;
+  border-color: #5b4fcf;
+}
+
+/* Forms */
+.form-control:focus {
+  border-color: #a89fe0;
+  box-shadow: 0 0 0 0.2rem rgba(91, 79, 207, 0.15);
+}
+
+/* Cards general */
+.card {
+  border-radius: 12px;
+}
+
+/* Audio button */
+.audio-btn {
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.audio-btn:hover {
+  opacity: 1;
+}
+
+/* Dialogue chat UI */
+.dialogue-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.dialogue-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.dialogue-left {
+  justify-content: flex-start;
+}
+
+.dialogue-right {
+  justify-content: flex-end;
+}
+
+.dialogue-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.85);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.dialogue-avatar.sm {
+  width: 30px;
+  height: 30px;
+  font-size: 1rem;
+}
+
+.dialogue-bubble-wrap {
+  max-width: 65%;
+}
+
+.dialogue-name {
+  font-size: 0.72rem;
+  color: #aaa;
+  margin-bottom: 2px;
+  padding: 0 4px;
+}
+
+.dialogue-bubble {
+  padding: 10px 14px;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+}
+
+.bubble-a {
+  background: var(--color-lavender);
+  border-bottom-left-radius: 4px;
+}
+
+.bubble-b {
+  background: var(--color-mint);
+  border-bottom-right-radius: 4px;
+}
+
+.bubble-foreign {
+  font-weight: 600;
+  font-size: 1rem;
+  color: #333;
+}
+
+.bubble-pinyin {
+  font-size: 0.78em;
+  font-style: italic;
+  color: #888;
+  margin-top: 2px;
+}
+
+.bubble-ru {
+  font-size: 0.8em;
+  color: #aaa;
+  font-style: italic;
+  margin-top: 3px;
+}

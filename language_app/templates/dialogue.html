@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Dialogue — LearLan{% endblock %}
+
+{% block content %}
+{% set lang = dialogue.cards.groups.language if dialogue.cards and dialogue.cards.groups else '' %}
+<div class="d-flex align-items-center gap-3 mb-4">
+  <a href="{{ url_for('dialogues.list_dialogues') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i>
+  </a>
+  <span class="fs-3">{{ '🇨🇳' if lang == 'zh' else ('🇬🇧' if lang == 'en' else '🇵🇱') }}</span>
+  <h4 class="fw-bold mb-0">{{ dialogue.cards.foreign_word if dialogue.cards else 'Dialogue' }}</h4>
+</div>
+
+{% set emojis = ['🐱','🌸','🦊','🐼','🦄','🐸','🦋','🐶','🐯','🐨'] %}
+{% set emoji_a = emojis[(dialogue.speaker_a_name or 'A')[0] | ord % 10] %}
+{% set emoji_b = emojis[(dialogue.speaker_b_name or 'B')[0] | ord % 10] %}
+
+<div class="d-flex gap-3 align-items-center mb-4">
+  <div class="d-flex align-items-center gap-2">
+    <div class="dialogue-avatar">{{ emoji_a }}</div>
+    <span class="fw-semibold">{{ dialogue.speaker_a_name }}</span>
+  </div>
+  <span class="text-muted">×</span>
+  <div class="d-flex align-items-center gap-2">
+    <div class="dialogue-avatar">{{ emoji_b }}</div>
+    <span class="fw-semibold">{{ dialogue.speaker_b_name }}</span>
+  </div>
+  <button class="btn btn-outline-primary btn-sm ms-auto" onclick="playFull()">▶ Play full</button>
+</div>
+
+<div class="dialogue-chat">
+{% for line in (dialogue.lines or []) %}
+{% set is_a = line.speaker == 'A' %}
+{% set audio_url = (dialogue.audio_lines_urls or [])[loop.index0] if loop.index0 < (dialogue.audio_lines_urls or [])|length else None %}
+{% if is_a %}
+<div class="dialogue-row dialogue-left">
+  <div class="dialogue-avatar">{{ emoji_a }}</div>
+  <div class="dialogue-bubble-wrap">
+    <div class="dialogue-name">{{ dialogue.speaker_a_name }}</div>
+    <div class="dialogue-bubble bubble-a">
+      <div class="bubble-foreign">{{ line.text_foreign }}</div>
+      {% if line.get('text_pinyin') %}<div class="bubble-pinyin">{{ line.text_pinyin }}</div>{% endif %}
+      <div class="bubble-ru">{{ line.text_ru }}</div>
+    </div>
+  </div>
+  {% if audio_url %}<button class="btn btn-link btn-sm p-0 align-self-center" onclick="playAudio('{{ audio_url }}')"><i class="bi bi-volume-up"></i></button>{% endif %}
+</div>
+{% else %}
+<div class="dialogue-row dialogue-right">
+  {% if audio_url %}<button class="btn btn-link btn-sm p-0 align-self-center" onclick="playAudio('{{ audio_url }}')"><i class="bi bi-volume-up"></i></button>{% endif %}
+  <div class="dialogue-bubble-wrap">
+    <div class="dialogue-name text-end">{{ dialogue.speaker_b_name }}</div>
+    <div class="dialogue-bubble bubble-b">
+      <div class="bubble-foreign">{{ line.text_foreign }}</div>
+      {% if line.get('text_pinyin') %}<div class="bubble-pinyin">{{ line.text_pinyin }}</div>{% endif %}
+      <div class="bubble-ru">{{ line.text_ru }}</div>
+    </div>
+  </div>
+  <div class="dialogue-avatar">{{ emoji_b }}</div>
+</div>
+{% endif %}
+{% endfor %}
+</div>
+
+<audio id="audioPlayer"></audio>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const audioUrls = {{ (dialogue.audio_lines_urls or []) | tojson }};
+let idx = 0;
+
+function playAudio(url) {
+  const p = document.getElementById('audioPlayer');
+  p.src = url; p.play();
+}
+
+function playFull() {
+  const urls = audioUrls.filter(Boolean);
+  if (!urls.length) return;
+  idx = 0;
+  const p = document.getElementById('audioPlayer');
+  p.src = urls[0]; p.play();
+  p.onended = () => {
+    idx++;
+    if (idx < urls.length) { p.src = urls[idx]; p.play(); }
+    else p.onended = null;
+  };
+}
+</script>
+{% endblock %}
