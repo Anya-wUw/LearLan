@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, session, jsonify
 from routes.auth import login_required
 from services.db import get_client
+from services import tts
 
 groups_bp = Blueprint("groups", __name__)
 
@@ -42,6 +43,12 @@ def view_group(group_id):
             (ex, audio_urls[i] if i < len(audio_urls) else None)
             for i, ex in enumerate(examples)
         ]
+        # Flag cards that have missing or incomplete audio
+        card["audio_incomplete"] = (
+            not card.get("audio_word_url")
+            or len(audio_urls) < len(examples)
+            or any(u is None for u in audio_urls[:len(examples)])
+        )
 
     # Load which cards have dialogues
     if cards:
@@ -75,3 +82,47 @@ def delete_group(group_id):
     db = get_client()
     db.table("groups").delete().eq("id", group_id).eq("user_id", user_id).execute()
     return jsonify({"success": True})
+
+
+@groups_bp.route("/groups/<group_id>/regenerate-audio", methods=["POST"])
+@login_required
+def regenerate_group_audio(group_id):
+    """Queue audio regeneration for every card in the group that has missing or incomplete audio."""
+    user_id = session["user_id"]
+    db = get_client()
+
+    group_result = db.table("groups").select("language").eq("id", group_id).eq("user_id", user_id).limit(1).execute()
+    group = group_result.data[0] if group_result.data else None
+    if not group:
+        return jsonify({"error": "Not found"}), 404
+
+    language = group["language"]
+    cards_result = db.table("cards").select("*").eq("group_id", group_id).execute()
+    cards = cards_result.data or []
+
+    broken = []
+    for card in cards:
+        examples = card.get("examples") or []
+        audio_urls = card.get("audio_examples_urls") or []
+        incomplete = (
+            not card.get("audio_word_url")
+            or len(audio_urls) < len(examples)
+            or any(u is None for u in audio_urls[:len(examples)])
+        )
+        if incomplete:
+            broken.append({
+                "id": card["id"],
+                "foreign_word": card["foreign_word"],
+                "examples": examples,
+            })
+
+    if broken:
+        def _update(card_id, word_url, example_urls):
+            get_client().table("cards").update({
+                "audio_word_url": word_url,
+                "audio_examples_urls": example_urls,
+            }).eq("id", card_id).execute()
+
+        tts.generate_audio_for_group_background(broken, user_id, language, _update)
+
+    return jsonify({"queued": len(broken)})

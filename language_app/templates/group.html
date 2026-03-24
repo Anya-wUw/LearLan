@@ -10,13 +10,19 @@
     <span class="fs-3">{{ '🇨🇳' if group.language == 'zh' else ('🇬🇧' if group.language == 'en' else '🇵🇱') }}</span>
     <h3 class="fw-bold mb-0" id="groupTitle">{{ group.name }}</h3>
   </div>
-  <div class="d-flex gap-2">
+  <div class="d-flex gap-2 flex-wrap">
     <button class="btn btn-outline-secondary btn-sm" onclick="renameThisGroup()">
       <i class="bi bi-pencil me-1"></i> Rename
     </button>
     <a href="{{ url_for('chat.chat', group_id=group.id) }}" class="btn btn-outline-primary btn-sm">
       <i class="bi bi-plus-lg me-1"></i> Add Words
     </a>
+    {% if cards and cards | selectattr('audio_incomplete') | list %}
+    <button class="btn btn-outline-warning btn-sm" id="regenAllBtn" onclick="regenerateAllAudio()">
+      <i class="bi bi-arrow-clockwise me-1"></i> Fix missing audio
+      <span class="badge bg-warning text-dark ms-1">{{ cards | selectattr('audio_incomplete') | list | length }}</span>
+    </button>
+    {% endif %}
     <button class="btn btn-outline-danger btn-sm" onclick="deleteThisGroup()">
       <i class="bi bi-trash me-1"></i> Delete Group
     </button>
@@ -49,7 +55,7 @@
               <i class="bi bi-trash"></i>
             </button>
             <button class="btn btn-sm btn-link p-1" title="Dialogue"
-                    onclick="openDialogue('{{ card.id }}', '{{ card.foreign_word | e }}', {{ 'true' if card.id in cards_with_dialogues else 'false' }})">
+                    onclick="openDialogue('{{ card.id }}', '{{ card.foreign_word | e }}')">
               💬
             </button>
           </div>
@@ -60,8 +66,14 @@
                     onclick="event.stopPropagation(); playAudio('{{ card.audio_word_url }}')">
               <i class="bi bi-volume-up-fill"></i>
             </button>
-            {% else %}
-            <span class="text-muted small" title="Audio generating…"><i class="bi bi-hourglass-split"></i></span>
+            {% endif %}
+            {% if card.audio_incomplete %}
+            <button class="btn btn-sm btn-link p-0 text-warning"
+                    title="{% if card.audio_word_url %}Examples audio missing — click to regenerate{% else %}Audio missing — click to regenerate{% endif %}"
+                    id="regen-{{ card.id }}"
+                    onclick="event.stopPropagation(); regenerateAudio('{{ card.id }}', this)">
+              <i class="bi bi-arrow-clockwise"></i>
+            </button>
             {% endif %}
           </div>
           <div class="text-muted small fst-italic">{{ card.transcription }}</div>
@@ -146,12 +158,25 @@
         </div>
       </div>
       <div class="modal-footer border-0 pt-0 d-none" id="dialogueFooter">
+        <span class="text-muted small me-auto" id="dialoguePager"></span>
+        <button class="btn btn-outline-secondary btn-sm" id="prevDlgBtn" onclick="showDialogue(currentDlgIndex - 1)" style="display:none">
+          <i class="bi bi-chevron-left"></i> Prev
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" id="nextDlgBtn" onclick="showDialogue(currentDlgIndex + 1)" style="display:none">
+          Next <i class="bi bi-chevron-right"></i>
+        </button>
         <button class="btn btn-outline-primary btn-sm" onclick="playFullDialogue()">
-          ▶ Play full dialogue
+          ▶ Play full
+        </button>
+        <button class="btn btn-outline-success btn-sm" id="newDlgBtn" onclick="generateNewDialogue()">
+          <i class="bi bi-plus-lg me-1"></i>New dialogue
         </button>
         <a id="dialogueViewLink" href="#" class="btn btn-outline-secondary btn-sm">
           <i class="bi bi-arrows-fullscreen me-1"></i>Full view
         </a>
+        <button class="btn btn-outline-danger btn-sm" id="deleteDlgBtn" onclick="deleteCurrentDialogue()">
+          <i class="bi bi-trash"></i>
+        </button>
       </div>
     </div>
   </div>
@@ -165,10 +190,19 @@
 <script>
 const GROUP_ID = '{{ group.id }}';
 const GROUP_LANGUAGE = '{{ group.language }}';
+
+// current dialogue state
+let currentCardId = null;
+let allDialogues = [];       // dialogues for current card
+let currentDlgIndex = 0;
 let currentDialogueAudioUrls = [];
 let dialogueAudioIndex = 0;
 
-const EMOJIS = ['🐱','🌸','🦊','🐼','🦄','🐸','🦋','🐶','🐯','🐨'];
+const EMOJIS = [
+  '🐱','🌸','🦊','🐼','🦄','🐸','🦋','🐶','🐯','🐨',
+  '🦁','🐮','🐷','🐙','🦀','🐬','🦜','🦩','🌺','🍀',
+  '🌙','⭐','🔥','💎','🎯','🎪','🎭','🎨','🚀','🌈'
+];
 function getAvatar(name) {
   const emoji = EMOJIS[(name || '?').charCodeAt(0) % EMOJIS.length];
   return `<div class="dialogue-avatar">${emoji}</div>`;
@@ -194,12 +228,16 @@ function cancelEdit(cardId) {
 }
 async function saveEdit(cardId) {
   const data = {
-    foreign_word: document.getElementById(`edit-word-${cardId}`).value,
-    transcription: document.getElementById(`edit-trans-${cardId}`).value,
+    foreign_word:   document.getElementById(`edit-word-${cardId}`).value,
+    transcription:  document.getElementById(`edit-trans-${cardId}`).value,
     translation_ru: document.getElementById(`edit-ru-${cardId}`).value,
     translation_en: document.getElementById(`edit-en-${cardId}`).value,
   };
-  const res = await fetch(`/cards/${cardId}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+  const res = await fetch(`/cards/${cardId}`, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  });
   const d = await res.json();
   if (d.success) {
     cancelEdit(cardId);
@@ -211,7 +249,7 @@ async function saveEdit(cardId) {
 }
 async function deleteCard(cardId) {
   if (!confirm('Delete this card?')) return;
-  const res = await fetch(`/cards/${cardId}`, {method:'DELETE'});
+  const res = await fetch(`/cards/${cardId}`, {method: 'DELETE'});
   const d = await res.json();
   if (d.success) document.getElementById(`card-container-${cardId}`).remove();
 }
@@ -219,48 +257,173 @@ async function renameThisGroup() {
   const current = document.getElementById('groupTitle').textContent.trim();
   const name = prompt('New group name:', current);
   if (!name || name.trim() === current) return;
-  const res = await fetch(`/groups/${GROUP_ID}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim()})});
+  const res = await fetch(`/groups/${GROUP_ID}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: name.trim()})
+  });
   const d = await res.json();
   if (d.success) document.getElementById('groupTitle').textContent = name.trim();
 }
 async function deleteThisGroup() {
   if (!confirm('Delete this entire group and all its cards?')) return;
-  const res = await fetch(`/groups/${GROUP_ID}`, {method:'DELETE'});
+  const res = await fetch(`/groups/${GROUP_ID}`, {method: 'DELETE'});
   const d = await res.json();
   if (d.success) window.location.href = '/dashboard';
 }
 
-async function openDialogue(cardId, word, hasDialogue) {
+// ── regenerate audio ──────────────────────────────────────────────────────────
+async function regenerateAudio(cardId, btn) {
+  if (!btn) btn = document.getElementById(`regen-${cardId}`);
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+  try {
+    const res = await fetch(`/cards/${cardId}/regenerate-audio`, {method: 'POST'});
+    const d = await res.json();
+    if (d.success) {
+      btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+      showToast('🔊 Audio queued — word + all examples will update shortly.', 'success');
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+  }
+}
+
+async function regenerateAllAudio() {
+  const btn = document.getElementById('regenAllBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i> Queuing…';
+  }
+  try {
+    const res = await fetch(`/groups/${GROUP_ID}/regenerate-audio`, {method: 'POST'});
+    const d = await res.json();
+    if (d.queued !== undefined) {
+      showToast(`🔊 Queued audio for ${d.queued} card${d.queued !== 1 ? 's' : ''} — refresh in a moment.`, 'success');
+      if (btn) btn.innerHTML = `<i class="bi bi-check-lg me-1"></i> Queued ${d.queued}`;
+    } else {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Fix missing audio'; }
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Fix missing audio'; }
+  }
+}
+
+// ── dialogue ──────────────────────────────────────────────────────────────────
+async function openDialogue(cardId, word) {
+  currentCardId = cardId;
+  allDialogues = [];
+  currentDlgIndex = 0;
+
   const modal = new bootstrap.Modal(document.getElementById('dialogueModal'));
   document.getElementById('dialogueModalTitle').textContent = `💬 ${word}`;
-  document.getElementById('dialogueModalBody').innerHTML = `<div class="text-center py-4"><div class="spinner-border text-primary"></div><p class="text-muted mt-2">${hasDialogue ? 'Loading…' : 'Generating dialogue…'}</p></div>`;
+  setDialogueLoading('Loading…');
   document.getElementById('dialogueFooter').classList.add('d-none');
   modal.show();
 
-  const res = await fetch(`/cards/${cardId}/dialogue`, {method:'POST'});
+  // Fetch existing dialogues for this card
+  const res = await fetch(`/cards/${cardId}/dialogues`);
   const data = await res.json();
+
   if (data.error) {
-    document.getElementById('dialogueModalBody').innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+    setDialogueBody(`<div class="alert alert-danger">${data.error}</div>`);
     return;
   }
-  renderDialogue(data.dialogue);
+
+  allDialogues = data.dialogues || [];
+
+  if (allDialogues.length === 0) {
+    // No dialogues yet — generate one automatically
+    await generateNewDialogue();
+  } else {
+    showDialogue(0);
+  }
+}
+
+function showWarnings(warnings) {
+  if (!warnings || !warnings.length) return;
+  warnings.forEach((msg, i) => {
+    const type = msg.startsWith('✓') ? 'success' : msg.startsWith('⚠') ? 'danger' : 'warning';
+    setTimeout(() => showToast(msg, type), i * 600);
+  });
+}
+
+async function generateNewDialogue() {
+  if (!currentCardId) return;
+  setDialogueLoading('Generating dialogue…');
+  document.getElementById('dialogueFooter').classList.add('d-none');
+
+  const res = await fetch(`/cards/${currentCardId}/dialogue`, {method: 'POST'});
+  const data = await res.json();
+
+  showWarnings(data.warnings);
+
+  if (data.rate_limited) {
+    showToast('⚡ Rate limit reached — please try again in a moment.', 'warning');
+    setDialogueBody(`<div class="alert alert-warning">${data.error}</div>`);
+    return;
+  }
+  if (data.error) {
+    setDialogueBody(`<div class="alert alert-danger">${data.error}</div>`);
+    return;
+  }
+
+  allDialogues.unshift(data.dialogue);  // newest first
+  showDialogue(0);
+}
+
+function showDialogue(index) {
+  if (index < 0 || index >= allDialogues.length) return;
+  currentDlgIndex = index;
+  const dialogue = allDialogues[index];
+  renderDialogue(dialogue);
+
+  // update pager
+  const pager = document.getElementById('dialoguePager');
+  pager.textContent = allDialogues.length > 1
+    ? `Dialogue ${index + 1} of ${allDialogues.length}`
+    : '';
+
+  document.getElementById('prevDlgBtn').style.display =
+    (allDialogues.length > 1 && index > 0) ? '' : 'none';
+  document.getElementById('nextDlgBtn').style.display =
+    (allDialogues.length > 1 && index < allDialogues.length - 1) ? '' : 'none';
+}
+
+function setDialogueLoading(msg) {
+  document.getElementById('dialogueModalBody').innerHTML = `
+    <div class="text-center py-4">
+      <div class="spinner-border text-primary"></div>
+      <p class="text-muted mt-2">${msg}</p>
+    </div>`;
+}
+function setDialogueBody(html) {
+  document.getElementById('dialogueModalBody').innerHTML = html;
 }
 
 function renderDialogue(dialogue) {
-  const lines = dialogue.lines || [];
-  const aName = dialogue.speaker_a_name || 'A';
-  const bName = dialogue.speaker_b_name || 'B';
+  const lines    = dialogue.lines || [];
+  const aName    = dialogue.speaker_a_name || 'A';
+  const bName    = dialogue.speaker_b_name || 'B';
   const audioUrls = dialogue.audio_lines_urls || [];
   currentDialogueAudioUrls = audioUrls;
 
   document.getElementById('dialogueViewLink').href = `/dialogues/${dialogue.id}`;
+  document.getElementById('deleteDlgBtn').dataset.dlgId = dialogue.id;
 
   let html = `<div class="dialogue-chat">`;
   lines.forEach((line, i) => {
     const isA = line.speaker === 'A';
     const name = isA ? aName : bName;
-    const url = audioUrls[i];
-    const audioBtn = url ? `<button class="btn btn-link btn-sm p-0 align-self-center" onclick="playAudio('${url}')"><i class="bi bi-volume-up"></i></button>` : '';
+    const url  = audioUrls[i];
+    const audioBtn = url
+      ? `<button class="btn btn-link btn-sm p-0 align-self-center" onclick="playAudio('${url}')"><i class="bi bi-volume-up"></i></button>`
+      : '';
     const bubble = `<div class="dialogue-bubble-wrap">
       <div class="dialogue-name ${isA ? '' : 'text-end'}">${name}</div>
       <div class="dialogue-bubble ${isA ? 'bubble-a' : 'bubble-b'}">
@@ -277,13 +440,36 @@ function renderDialogue(dialogue) {
   });
   html += `</div>`;
 
-  document.getElementById('dialogueModalBody').innerHTML = html;
+  setDialogueBody(html);
   document.getElementById('dialogueFooter').classList.remove('d-none');
+}
+
+async function deleteCurrentDialogue() {
+  const btn = document.getElementById('deleteDlgBtn');
+  const dlgId = btn.dataset.dlgId;
+  if (!dlgId || !confirm('Delete this dialogue?')) return;
+
+  await fetch(`/dialogues/${dlgId}`, {method: 'DELETE'});
+  allDialogues.splice(currentDlgIndex, 1);
+
+  if (allDialogues.length === 0) {
+    setDialogueBody('<p class="text-muted text-center py-3">No dialogues yet.</p>');
+    document.getElementById('dialogueFooter').classList.add('d-none');
+    // Show only "New dialogue" button
+    document.getElementById('dialogueFooter').classList.remove('d-none');
+    document.getElementById('prevDlgBtn').style.display = 'none';
+    document.getElementById('nextDlgBtn').style.display = 'none';
+    document.getElementById('dialoguePager').textContent = '';
+    document.getElementById('dialogueViewLink').classList.add('d-none');
+    document.getElementById('deleteDlgBtn').classList.add('d-none');
+  } else {
+    showDialogue(Math.min(currentDlgIndex, allDialogues.length - 1));
+  }
 }
 
 function playFullDialogue() {
   const urls = currentDialogueAudioUrls.filter(Boolean);
-  if (!urls.length) return;
+  if (!urls.length) { showToast('Audio is still generating — try again shortly.', 'info'); return; }
   dialogueAudioIndex = 0;
   const player = document.getElementById('audioPlayer');
   player.src = urls[0];

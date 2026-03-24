@@ -39,7 +39,7 @@
 <!-- Loading -->
 <div id="loadingSpinner" class="text-center py-4 d-none">
   <div class="spinner-border text-primary" role="status"></div>
-  <p class="text-muted mt-2">Generating flashcards…</p>
+  <p class="text-muted mt-2" id="loadingMsg">Generating flashcards…</p>
 </div>
 
 <!-- Error -->
@@ -51,7 +51,12 @@
 <!-- Save toolbar (hidden until cards generated) -->
 <div id="saveToolbar" class="d-none">
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 py-3 border-top mt-2">
-    <span id="cardCountBadge" class="text-muted small"></span>
+    <div class="d-flex align-items-center gap-2">
+      <span id="cardCountBadge" class="text-muted small"></span>
+      <span id="autoSaveBadge" class="badge bg-success d-none">
+        <i class="bi bi-cloud-check me-1"></i>Auto-saved
+      </span>
+    </div>
     <button class="btn btn-success" onclick="openSaveModal()">
       <i class="bi bi-check-lg me-1"></i> Save as Group
     </button>
@@ -67,17 +72,16 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        {% if not group %}
         <label class="form-label">Group name</label>
-        <input type="text" id="groupNameInput" class="form-control" placeholder="Group 1" />
-        {% endif %}
+        <input type="text" id="groupNameInput" class="form-control"
+               placeholder="Group name" value="{{ group.name if group else '' }}" />
         <p class="text-muted small mt-2 mb-0">
-          Audio pronunciation will be generated in the background after saving.
+          Audio pronunciation is generated in the background after saving.
         </p>
       </div>
       <div class="modal-footer border-0">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-success" onclick="saveCards()">
+        <button type="button" class="btn btn-success" id="saveBtn" onclick="saveCards()">
           <i class="bi bi-save me-1"></i> Save
         </button>
       </div>
@@ -89,13 +93,20 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/cards.js') }}"></script>
 <script>
-const LANGUAGE = '{{ language }}';
-const GROUP_ID = '{{ group.id if group else "" }}';
-let allCards = [];
+const LANGUAGE  = '{{ language }}';
+const GROUP_ID  = '{{ group.id if group else "" }}';
+let allCards    = [];
+let savedGroupId = GROUP_ID || null;  // set after first autosave
 
-function setLoading(on) {
+// ── helpers ───────────────────────────────────────────────────────────────────
+function escapeAttr(str) {
+  return (str || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function setLoading(on, msg) {
   document.getElementById('loadingSpinner').classList.toggle('d-none', !on);
   document.getElementById('generateBtn').disabled = on;
+  if (msg) document.getElementById('loadingMsg').textContent = msg;
 }
 
 function showError(msg) {
@@ -103,52 +114,120 @@ function showError(msg) {
   el.textContent = msg;
   el.classList.remove('d-none');
 }
-
 function clearError() {
   document.getElementById('errorAlert').classList.add('d-none');
 }
 
+function showWarnings(warnings) {
+  if (!warnings || !warnings.length) return;
+  // Show each warning as a sequential toast (staggered 600ms apart)
+  warnings.forEach((msg, i) => {
+    const type = msg.startsWith('✓') ? 'success' : msg.startsWith('⚠') ? 'danger' : 'warning';
+    setTimeout(() => showToast(msg, type), i * 600);
+  });
+}
+
+// ── generate ──────────────────────────────────────────────────────────────────
 async function generateCards() {
   const prompt = document.getElementById('promptInput').value.trim();
   if (!prompt) { showError('Please enter a prompt.'); return; }
   clearError();
-  setLoading(true);
+  setLoading(true, 'Generating flashcards…');
 
   const res = await fetch('/chat/generate', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({prompt, language: LANGUAGE, n: parseInt(document.getElementById('cardCount').value), existing_words: []})
+    body: JSON.stringify({
+      prompt, language: LANGUAGE,
+      n: parseInt(document.getElementById('cardCount').value),
+      existing_words: []
+    })
   });
   const data = await res.json();
   setLoading(false);
 
+  if (data.rate_limited) {
+    showToast('⚡ Rate limit reached — please try again in a moment.', 'warning');
+    showError(data.error);
+    return;
+  }
   if (data.error) { showError(data.error); return; }
 
+  showWarnings(data.warnings);
   allCards = data.cards;
   renderPreview();
+  autoSave(data.cards, 0);
 }
 
 async function generateMore() {
   const prompt = document.getElementById('promptInput').value.trim();
   if (!prompt) { showError('Please enter a prompt.'); return; }
   clearError();
-  setLoading(true);
+  setLoading(true, 'Generating more cards…');
 
   const existingWords = allCards.map(c => c.foreign_word);
   const res = await fetch('/chat/generate', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({prompt, language: LANGUAGE, n: parseInt(document.getElementById('cardCount').value), existing_words: existingWords})
+    body: JSON.stringify({
+      prompt, language: LANGUAGE,
+      n: parseInt(document.getElementById('cardCount').value),
+      existing_words: existingWords
+    })
   });
   const data = await res.json();
   setLoading(false);
 
+  if (data.rate_limited) {
+    showToast('⚡ Rate limit reached — please try again in a moment.', 'warning');
+    showError(data.error);
+    return;
+  }
   if (data.error) { showError(data.error); return; }
 
+  showWarnings(data.warnings);
+  const startIndex = allCards.length;
   allCards = allCards.concat(data.cards);
   renderPreview();
+  autoSave(data.cards, startIndex);
 }
 
+// ── auto-save ─────────────────────────────────────────────────────────────────
+async function autoSave(newCards, startIndex) {
+  const prompt = document.getElementById('promptInput').value.trim();
+  const cardsWithIndex = newCards.map((c, i) => ({...c, local_index: startIndex + i}));
+
+  try {
+    const res = await fetch('/chat/autosave', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        language: LANGUAGE,
+        group_id: savedGroupId,
+        prompt,
+        cards: cardsWithIndex
+      })
+    });
+    const data = await res.json();
+    if (data.error) return;
+
+    savedGroupId = data.group_id;
+    data.cards.forEach(saved => {
+      const idx = saved.local_index;
+      if (idx != null && allCards[idx]) {
+        allCards[idx].card_id = saved.id;
+      }
+    });
+
+    const badge = document.getElementById('autoSaveBadge');
+    badge.classList.remove('d-none');
+    setTimeout(() => badge.classList.add('d-none'), 3000);
+  } catch (e) {
+    console.warn('Auto-save failed:', e);
+  }
+}
+
+// ── render preview ────────────────────────────────────────────────────────────
 function renderPreview() {
   const container = document.getElementById('cardsPreview');
   if (!allCards.length) { container.innerHTML = ''; return; }
@@ -156,28 +235,42 @@ function renderPreview() {
   container.innerHTML = `<div class="row g-3" id="cardsGrid">${allCards.map((c, i) => cardTileHTML(c, i)).join('')}</div>`;
   document.getElementById('saveToolbar').classList.remove('d-none');
   document.getElementById('addMoreBtn').classList.remove('d-none');
-  document.getElementById('cardCountBadge').textContent = `${allCards.length} card${allCards.length !== 1 ? 's' : ''}`;
+  document.getElementById('cardCountBadge').textContent =
+    `${allCards.length} card${allCards.length !== 1 ? 's' : ''}`;
 }
 
 function cardTileHTML(card, index) {
   const examplesHTML = (card.examples || []).map((ex, j) => `
     <div class="mb-2 pb-2 border-bottom">
       <input type="text" class="form-control form-control-sm mb-1" value="${escapeAttr(ex.sentence_foreign)}"
-             onchange="updateExample(${index}, ${j}, 'sentence_foreign', this.value)" placeholder="Foreign sentence" />
+             onchange="updateExample(${index}, ${j}, 'sentence_foreign', this.value)"
+             placeholder="Foreign sentence" />
+      ${ex.sentence_pinyin !== undefined ? `
+      <input type="text" class="form-control form-control-sm text-muted mb-1 fst-italic" value="${escapeAttr(ex.sentence_pinyin || '')}"
+             onchange="updateExample(${index}, ${j}, 'sentence_pinyin', this.value)"
+             placeholder="Pinyin" />` : ''}
       <input type="text" class="form-control form-control-sm text-muted" value="${escapeAttr(ex.sentence_ru)}"
-             onchange="updateExample(${index}, ${j}, 'sentence_ru', this.value)" placeholder="Russian translation" />
+             onchange="updateExample(${index}, ${j}, 'sentence_ru', this.value)"
+             placeholder="Russian translation" />
     </div>
   `).join('');
+
+  const savedDot = card.card_id
+    ? `<span title="Saved" class="text-success small"><i class="bi bi-cloud-check"></i></span>`
+    : `<span title="Saving…" class="text-muted small"><i class="bi bi-cloud-upload"></i></span>`;
 
   return `
   <div class="col-md-4 col-sm-6" id="tile-${index}">
     <div class="card h-100 shadow-sm preview-card">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-start mb-2">
-          <input type="text" class="form-control form-control-sm fw-bold fs-5 border-0 p-0"
-                 value="${escapeAttr(card.foreign_word)}"
-                 onchange="updateCard(${index}, 'foreign_word', this.value)"
-                 style="background:transparent" />
+          <div class="d-flex align-items-center gap-1 flex-grow-1">
+            ${savedDot}
+            <input type="text" class="form-control form-control-sm fw-bold fs-5 border-0 p-0"
+                   value="${escapeAttr(card.foreign_word)}"
+                   onchange="updateCard(${index}, 'foreign_word', this.value)"
+                   style="background:transparent" />
+          </div>
           <button class="btn btn-sm btn-link text-danger p-0 ms-2" onclick="removeCard(${index})">
             <i class="bi bi-x-lg"></i>
           </button>
@@ -195,7 +288,9 @@ function cardTileHTML(card, index) {
                onchange="updateCard(${index}, 'translation_en', this.value)"
                style="background:transparent" placeholder="English" />
         <details>
-          <summary class="text-muted small" style="cursor:pointer">Examples (${(card.examples||[]).length})</summary>
+          <summary class="text-muted small" style="cursor:pointer">
+            Examples (${(card.examples||[]).length})
+          </summary>
           <div class="mt-2">${examplesHTML}</div>
         </details>
       </div>
@@ -203,10 +298,7 @@ function cardTileHTML(card, index) {
   </div>`;
 }
 
-function escapeAttr(str) {
-  return (str || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
+// ── card mutations ────────────────────────────────────────────────────────────
 function updateCard(index, field, value) {
   allCards[index][field] = value;
 }
@@ -215,38 +307,51 @@ function updateExample(cardIndex, exIndex, field, value) {
   allCards[cardIndex].examples[exIndex][field] = value;
 }
 
-function removeCard(index) {
+async function removeCard(index) {
+  const card = allCards[index];
+  if (card && card.card_id) {
+    await fetch(`/cards/${card.card_id}`, {method: 'DELETE'});
+  }
   allCards.splice(index, 1);
   renderPreview();
 }
 
+// ── save modal & final save ───────────────────────────────────────────────────
 function openSaveModal() {
   if (!allCards.length) return;
-  {% if not group %}
-  document.getElementById('groupNameInput').value = '';
-  {% endif %}
+  // Pre-fill name: use prompt text (first 45 chars) if no group and no name yet
+  const nameInput = document.getElementById('groupNameInput');
+  if (!nameInput.value.trim() && !GROUP_ID) {
+    const prompt = document.getElementById('promptInput').value.trim();
+    nameInput.value = prompt.length > 45 ? prompt.slice(0, 45) + '…' : prompt;
+  }
   new bootstrap.Modal(document.getElementById('saveModal')).show();
 }
 
 async function saveCards() {
-  {% if not group %}
+  const saveBtn = document.getElementById('saveBtn');
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving…';
+
   const groupName = document.getElementById('groupNameInput').value.trim() || 'Group';
-  {% else %}
-  const groupName = '{{ group.name }}';
-  {% endif %}
 
   const res = await fetch('/chat/save', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       language: LANGUAGE,
-      group_id: GROUP_ID || null,
+      group_id: savedGroupId,
       group_name: groupName,
-      cards: allCards
+      cards: allCards   // server patches existing cards by card_id
     })
   });
   const data = await res.json();
-  if (data.error) { showError(data.error); return; }
+  if (data.error) {
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = '<i class="bi bi-save me-1"></i> Save';
+    showError(data.error);
+    return;
+  }
   window.location.href = data.redirect;
 }
 </script>

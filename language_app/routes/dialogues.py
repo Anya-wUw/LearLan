@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, request, jsonify, session, redirec
 from routes.auth import login_required
 from services.db import get_client
 from services import llm, tts
+from services.llm import RateLimitError
 
 dialogues_bp = Blueprint("dialogues", __name__)
 
@@ -33,13 +34,28 @@ def view_dialogue(dialogue_id):
     return render_template("dialogue.html", dialogue=dialogue)
 
 
+@dialogues_bp.route("/cards/<card_id>/dialogues", methods=["GET"])
+@login_required
+def list_card_dialogues(card_id):
+    """Return all dialogues for a card."""
+    user_id = session["user_id"]
+    db = get_client()
+
+    card_result = db.table("cards").select("*, groups(language, user_id)").eq("id", card_id).limit(1).execute()
+    card = card_result.data[0] if card_result.data else None
+    if not card or card["groups"]["user_id"] != user_id:
+        return jsonify({"error": "Not found"}), 404
+
+    result = db.table("dialogues").select("*").eq("card_id", card_id).order("created_at", desc=True).execute()
+    return jsonify({"dialogues": result.data or []})
+
+
 @dialogues_bp.route("/cards/<card_id>/dialogue", methods=["POST"])
 @login_required
 def generate_dialogue(card_id):
     user_id = session["user_id"]
     db = get_client()
 
-    # Verify card belongs to user
     card_result = db.table("cards").select("*, groups(language, user_id)").eq("id", card_id).limit(1).execute()
     card = card_result.data[0] if card_result.data else None
     if not card or card["groups"]["user_id"] != user_id:
@@ -47,19 +63,16 @@ def generate_dialogue(card_id):
 
     language = card["groups"]["language"]
 
-    # Check if dialogue already exists
-    existing = db.table("dialogues").select("*").eq("card_id", card_id).limit(1).execute()
-    if existing.data:
-        return jsonify({"dialogue": existing.data[0]})
-
-    # Generate dialogue text
+    # Generate new dialogue text (always — multiple dialogues per card are allowed)
     try:
-        dialogue_data = llm.generate_dialogue(
+        dialogue_data, warnings = llm.generate_dialogue(
             card["foreign_word"],
             card.get("translation_ru", ""),
             card.get("translation_en", ""),
             language,
         )
+    except RateLimitError as e:
+        return jsonify({"error": str(e), "rate_limited": True}), 429
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -74,7 +87,6 @@ def generate_dialogue(card_id):
     }).execute()
     dialogue = result.data[0]
 
-    # Generate audio in background
     tts.generate_dialogue_audio_background(
         dialogue["id"],
         dialogue_data.get("lines", []),
@@ -82,7 +94,7 @@ def generate_dialogue(card_id):
         _update_dialogue_audio,
     )
 
-    return jsonify({"dialogue": dialogue})
+    return jsonify({"dialogue": dialogue, "warnings": warnings})
 
 
 @dialogues_bp.route("/dialogues/<dialogue_id>", methods=["DELETE"])

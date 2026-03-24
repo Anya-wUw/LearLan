@@ -9,11 +9,18 @@
   </a>
   <span class="fs-3">{{ '🇨🇳' if lang == 'zh' else ('🇬🇧' if lang == 'en' else '🇵🇱') }}</span>
   <h4 class="fw-bold mb-0">{{ dialogue.cards.foreign_word if dialogue.cards else 'Dialogue' }}</h4>
+  <button class="btn btn-outline-danger btn-sm ms-auto" onclick="deleteDlg()">
+    <i class="bi bi-trash me-1"></i>Delete
+  </button>
 </div>
 
-{% set emojis = ['🐱','🌸','🦊','🐼','🦄','🐸','🦋','🐶','🐯','🐨'] %}
-{% set emoji_a = emojis[(dialogue.speaker_a_name or 'A')[0] | ord % 10] %}
-{% set emoji_b = emojis[(dialogue.speaker_b_name or 'B')[0] | ord % 10] %}
+{% set emojis = [
+  '🐱','🌸','🦊','🐼','🦄','🐸','🦋','🐶','🐯','🐨',
+  '🦁','🐮','🐷','🐙','🦀','🐬','🦜','🦩','🌺','🍀',
+  '🌙','⭐','🔥','💎','🎯','🎪','🎭','🎨','🚀','🌈'
+] %}
+{% set emoji_a = emojis[(dialogue.speaker_a_name or 'A')[0] | ord % (emojis | length)] %}
+{% set emoji_b = emojis[(dialogue.speaker_b_name or 'B')[0] | ord % (emojis | length)] %}
 
 <div class="d-flex gap-3 align-items-center mb-4">
   <div class="d-flex align-items-center gap-2">
@@ -43,11 +50,19 @@
       <div class="bubble-ru">{{ line.text_ru }}</div>
     </div>
   </div>
-  {% if audio_url %}<button class="btn btn-link btn-sm p-0 align-self-center" onclick="playAudio('{{ audio_url }}')"><i class="bi bi-volume-up"></i></button>{% endif %}
+  {% if audio_url %}
+  <button class="btn btn-link btn-sm p-0 align-self-center" onclick="playAudio('{{ audio_url }}')">
+    <i class="bi bi-volume-up"></i>
+  </button>
+  {% endif %}
 </div>
 {% else %}
 <div class="dialogue-row dialogue-right">
-  {% if audio_url %}<button class="btn btn-link btn-sm p-0 align-self-center" onclick="playAudio('{{ audio_url }}')"><i class="bi bi-volume-up"></i></button>{% endif %}
+  {% if audio_url %}
+  <button class="btn btn-link btn-sm p-0 align-self-center" onclick="playAudio('{{ audio_url }}')">
+    <i class="bi bi-volume-up"></i>
+  </button>
+  {% endif %}
   <div class="dialogue-bubble-wrap">
     <div class="dialogue-name text-end">{{ dialogue.speaker_b_name }}</div>
     <div class="dialogue-bubble bubble-b">
@@ -66,8 +81,11 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/cards.js') }}"></script>
 <script>
-const audioUrls = {{ (dialogue.audio_lines_urls or []) | tojson }};
+const audioUrls  = {{ (dialogue.audio_lines_urls or []) | tojson }};
+const DIALOGUE_ID = '{{ dialogue.id }}';
+const CARD_GROUP = '{{ dialogue.cards.groups.language if dialogue.cards and dialogue.cards.groups else "" }}';
 let idx = 0;
 
 function playAudio(url) {
@@ -77,7 +95,7 @@ function playAudio(url) {
 
 function playFull() {
   const urls = audioUrls.filter(Boolean);
-  if (!urls.length) return;
+  if (!urls.length) { showToast('Audio is still generating — try again shortly.', 'info'); return; }
   idx = 0;
   const p = document.getElementById('audioPlayer');
   p.src = urls[0]; p.play();
@@ -86,6 +104,13 @@ function playFull() {
     if (idx < urls.length) { p.src = urls[idx]; p.play(); }
     else p.onended = null;
   };
+}
+
+async function deleteDlg() {
+  if (!confirm('Delete this dialogue?')) return;
+  const res = await fetch(`/dialogues/${DIALOGUE_ID}`, {method: 'DELETE'});
+  const d = await res.json();
+  if (d.success) window.location.href = '{{ url_for("dialogues.list_dialogues") }}';
 }
 </script>
 {% endblock %}
