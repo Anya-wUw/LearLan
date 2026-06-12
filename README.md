@@ -11,6 +11,23 @@ A web-based language learning flashcard app for studying **Chinese (Mandarin)**,
 - **Language tabs** — filter your cards and dialogues by language
 - **Inline editing** — edit any card directly in the browser
 
+## Your account and collection of created cards
+All the card and dialogue collections you have created are stored in your personal account. You can sort them by language
+<img width="1213" height="700" alt="image" src="https://github.com/user-attachments/assets/6d421abb-cb47-4ed2-9de5-4bfaf45b038a" />
+
+## Card generation
+Describe the topic you’d like to learn, and the AI will generate suitable flashcards for you to study
+<img width="1175" height="383" alt="image" src="https://github.com/user-attachments/assets/165d436b-9136-4a6c-8a96-a9278f197d9f" />
+
+You can edit, delete and add your own words. A voice recording is also generated for each card
+<img width="1175" height="465" alt="image" src="https://github.com/user-attachments/assets/a677c7ee-6407-43d9-ae13-b5be2a2c6696" />
+
+## Generating dialogues
+You can generate dialogues to go with the flashcards you’ve created, so you can learn words in context. Audio accompaniment is also generated for the dialogues.
+<img width="1176" height="595" alt="image" src="https://github.com/user-attachments/assets/31bfe3f0-98f6-4b61-a19e-2197165d51e3" />
+
+
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -21,6 +38,9 @@ A web-based language learning flashcard app for studying **Chinese (Mandarin)**,
 | TTS | `edge-tts` (Microsoft Edge, free) |
 | Database | Supabase (free tier, PostgreSQL) |
 | Audio storage | Supabase Storage |
+
+
+
 
 ## Setup
 
